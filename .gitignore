@@ -1,24 +1,152 @@
-# Compiled class file
-*.class
+1. 🚀 Backend Setup
+1.1 server/server.js
+const express = require('express');
+const mongoose = require('mongoose');
+const cors = require('cors');
+const authRoutes = require('./routes/authRoutes');
+const postRoutes = require('./routes/postRoutes');
 
-# Log file
-*.log
+const app = express();
+app.use(cors());
+app.use(express.json());
 
-# BlueJ files
-*.ctxt
+mongoose.connect('mongodb://localhost:27017/social-platform')
+    .then(() => console.log("DB connected"));
 
-# Mobile Tools for Java (J2ME)
-.mtj.tmp/
+app.use('/api/auth', authRoutes);
+app.use('/api/posts', postRoutes);
 
-# Package Files #
-*.jar
-*.war
-*.nar
-*.ear
-*.zip
-*.tar.gz
-*.rar
+app.listen(5000, () => console.log("Server running on port 5000"));
 
-# virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
-hs_err_pid*
-replay_pid*
+1.2 Models
+models/User.js
+const mongoose = require('mongoose');
+const userSchema = new mongoose.Schema({
+  username: { type: String, unique: true },
+  email: String,
+  password: String,
+  bio: String,
+  profilePic: String
+});
+
+module.exports = mongoose.model('User', userSchema);
+models/Post.js
+const mongoose = require('mongoose');
+
+const postSchema = new mongoose.Schema({
+  userId: mongoose.Schema.Types.ObjectId,
+  content: String,
+  imageUrl: String,
+  likes: [mongoose.Schema.Types.ObjectId],
+  comments: [{
+    userId: mongoose.Schema.Types.ObjectId,
+    text: String,
+    createdAt: { type: Date, default: Date.now }
+  }],
+  createdAt: { type: Date, default: Date.now }
+});
+
+module.exports = mongoose.model('Post', postSchema);
+
+1.3 Routes
+routes/authRoutes.js
+const express = require('express');
+const router = express.Router();
+const User = require('../models/User');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+
+// Register
+router.post('/register', async (req, res) => {
+  const { username, email, password } = req.body;
+  const hashed = await bcrypt.hash(password, 10);
+  const user = new User({ username, email, password: hashed });
+  await user.save();
+  res.send("User registered");
+});
+
+// Login
+router.post('/login', async (req, res) => {
+  const { username, password } = req.body;
+  const user = await User.findOne({ username });
+  const isMatch = await bcrypt.compare(password, user.password);
+  if (!isMatch) return res.status(400).send("Invalid credentials");
+  const token = jwt.sign({ id: user._id }, 'secret');
+  res.json({ token });
+});
+
+module.exports = router;
+
+routes/postRoutes.js
+const express = require('express');
+const router = express.Router();
+const Post = require('../models/Post');
+
+// Create post
+router.post('/', async (req, res) => {
+  const post = new Post(req.body);
+  await post.save();
+  res.json(post);
+});
+
+// Get all posts
+router.get('/', async (req, res) => {
+  const posts = await Post.find().sort({ createdAt: -1 });
+  res.json(posts);
+});
+
+// Like post
+router.put('/like/:id', async (req, res) => {
+  await Post.findByIdAndUpdate(req.params.id, {
+    $addToSet: { likes: req.body.userId }
+  });
+  res.send("Liked");
+});
+
+module.exports = router;
+
+2. 🖼️ Frontend (React)
+2.1 App.js (simple post feed and creator)
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+
+function App() {
+  const [content, setContent] = useState('');
+  const [posts, setPosts] = useState([]);
+
+  const createPost = async () => {
+    await axios.post('http://localhost:5000/api/posts', {
+      content,
+      userId: "123", // replace with actual auth
+      imageUrl: ""
+    });
+    setContent('');
+    fetchPosts();
+  };
+
+  const fetchPosts = async () => {
+    const res = await axios.get('http://localhost:5000/api/posts');
+    setPosts(res.data);
+  };
+
+  useEffect(() => {
+    fetchPosts();
+  }, []);
+
+  return (
+    <div>
+      <h1>Social Feed</h1>
+      <textarea value={content} onChange={(e) => setContent(e.target.value)} />
+      <button onClick={createPost}>Post</button>
+
+      {posts.map(post => (
+        <div key={post._id}>
+          <p>{post.content}</p>
+          <small>{new Date(post.createdAt).toLocaleString()}</small>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export default App;
